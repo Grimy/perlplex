@@ -1,34 +1,45 @@
+""" Solver for linear optimization problems """
 import re, sys
 from fractions import Fraction
-from numpy import array
+from numpy import array, eye, vstack
 
-def base(p, n):
-	return array([0+(i == p) for i in xrange(n)])
+def parse(text):
+    """ Parses the specified textual representation of the system.
+    Returns a 3-tuple: (system, column_labels, line_labels) """
+    text = text.replace('z=', '(').replace('<=', '-(').replace('\n', ')\n')
+    names = sorted({m.group() for m in re.finditer(r'[a-zA-Z]\w*', text)})
+    text = re.sub(r'(\d)\s*([a-zA-Z\(])', r'\1*\2', text)
+    text = re.sub(r'(?<!\w)(\d*\.?\d+)', r'Fraction("\1")', text)
 
-def index_max(_iter):
-	return max(t[::-1] for t in enumerate(_iter))[1]
+    dic = dict(zip(names, -eye(len(names) + 1, dtype=int)))
+    _ = vstack([eval(line, dic, globals()) for line in text.splitlines()]).T
 
-lines = sys.stdin.readlines()
-vars = sorted({match.group() for match in re.finditer(r'[a-zA-Z]\w*', ''.join(lines))})
+    return (vstack([_[-1] - _[:-1], eye(len(_.T), dtype=int)[1:], -_[-1]]).T,
+            names +   ['e' + str(x) for x in xrange(1, len(_))] + ['b'],
+            ['z'] + ['e' + str(x) for x in xrange(1, len(_))])
 
-_ = []
-for ln in xrange(len(lines)):
-	line = re.sub(r'(?<=\d)\s*(?=[a-zA-Z\(])', '*', lines[ln].replace('z=', '(').replace('<=', '-(') + ')')
-	coeffs = eval(line, dict((vars[i], base(i, len(vars) + 1)) for i in xrange(len(vars))))
-	_.append(array(map(Fraction, list(coeffs[:-1] - coeffs[-1]) + list(base(ln - 1, len(lines) - 1)) + [-coeffs[-1]])))
+def solve(_):
+    """ Solves the specified system """
+    while True:
+        x = _[0].argmax()
+        y = array([l[-1] and l[x] / l[-1] for l in _]).argmax()
 
-cols = vars +   ['e' + str(x) for x in xrange(1, len(_))] + ['b']
-lines = ['z'] + ['e' + str(x) for x in xrange(1, len(_))]
+        yield (_, x, y)
+        if _[0, x] <= 0:
+            return
+        
+        _[y] /= _[y, x]
+        _ -= _[y] * _[:, [x]] * (1 - eye(len(_), dtype=int))[:, [y]]
 
-while True:
-	x = index_max(_[0])
-	if _[0][x] <= 0: break
-	y = index_max(l[-1] and l[x] / l[-1] for l in _)
+def main(text):
+    """ Pretty-prints the solution """
+    system, cols, lines = parse(text)
+    for (_, x, y) in solve(system):
+        print re.sub(r'\b(%s)\b' % cols[x], r'[\1]', '\t'.join(['\n'] + cols))
+        for label, line in zip(lines, _):
+            print '\t'.join([re.sub(r'\b(%s)\b' % lines[y], r'[\1]', label)] + map(str, line))
+        (lines[y], cols[x]) = (cols[x], lines[y])
 
-	print '\t'.join(['\n'] + cols).replace(cols[x], '[%s]' % cols[x])
-	for label, line in zip(lines, _):
-		print '\t'.join([label.replace(lines[y], '[%s]' % lines[y])] + map(str, line))
-	
-	(lines[y], cols[x]) = (cols[x], lines[y])
-	_ = [l / l[x] if l is _[y] else l - _[y] * l[x] / _[y][x] for l in _]
+if __name__ == '__main__':
+    main(sys.stdin.read())
 
