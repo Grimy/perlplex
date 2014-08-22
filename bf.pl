@@ -1,0 +1,1 @@
+eval join$/='$p;',qw[-- ++$ /\w/g?$$p=ord$&:& ${ print+chr$ --$ ++ }while$][$_=<>,map+7&25274%ord,/./g],0
