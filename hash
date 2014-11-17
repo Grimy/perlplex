@@ -1,0 +1,70 @@
+#!/usr/bin/perl -w
+use strict;
+
+# qw(1 3 4 4 4 4 5 5 5)
+# qw(1 2 4 4 5 5 6 6 6)
+# qw(1 2 3 5 6 6 6 6 6)
+
+my @hand = (0) x 11;
+my %ok = ();
+
+sub ffs {
+	$a = pop;
+	for (0..9) {
+		if ($a & (1 << $_)) {
+			return $_ + 1;
+		}
+	}
+	die "$a";
+}
+
+sub check_hash {
+	my $pos = 1 + $hand[1] / 2;
+	my $hash = $hand[1] & 1 ^ ~(~0 << $pos);
+	my $sum = $hand[1];
+	my $card = 2;
+
+	for (2..$#hand) {
+		$sum += $_ * $hand[$_];
+		for my $j (1..$hand[$_]) {
+			$hash |= 1 << ($pos += $_ + 1 - $card);
+			$card = $_;
+		}
+	}
+	return if $sum > 17 or $hand[1] > 12;
+	return if $ok{$hash};
+	$ok{$hash} = 1;
+	# printf "%2d, %17b\n", $sum, $hash;
+	printf "%2d, %17b\n", $sum, $hash if $hash & ~((1 << 12) - 1);
+
+	# printf "%b\n",  $hash;
+
+	$card = 1;
+	my @reverse = (0) x 11;
+	$reverse[1] = 1 - ($hash & 1);
+	$reverse[1] += 2 while (($hash >>= 1) & 1);
+	while ($hash) {
+		$card += ffs($hash) - 1;
+		$hash >>= ffs($hash);
+		$reverse[$card]++;
+	}
+	die "@reverse ne @hand" if "@reverse" ne "@hand";
+}
+
+sub check_all {
+	check_hash();
+	return if $_[0] == 0;
+
+	$_[0]--;
+	for ($_..10) {
+		$hand[$_]++;
+		&check_all;
+		$hand[$_]--;
+	}
+	$_[0]++;
+}
+
+$_[0] = 15;
+$_ = 1;
+&check_all;
+print scalar keys %ok;
