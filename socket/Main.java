@@ -3,6 +3,7 @@ import java.io.*;
 import java.nio.channels.*;
 import java.net.*;
 import java.util.*;
+import java.util.regex.*;
 
 class Main {
 	private static final float[] nans = new float[65536];
@@ -18,26 +19,35 @@ class Main {
 
 	public static void main(String... args) throws Exception {
 		testTagging();
-
-		ServerSocketChannel serv = ServerSocketChannel.open();
-		serv.bind(new InetSocketAddress(8080));
-		for (;;) {
-			testSockets(serv);
-		}
+		testXML(new Scanner(System.in));
 	}
 
-	private static void testSockets(ServerSocketChannel serv) throws IOException, InterruptedException {
-		SocketChannel cli = serv.accept();
-		cli.configureBlocking(false);
-		Scanner scanner = new Scanner(cli);
-		while (scanner.hasNextLine()) {
-			System.out.println(scanner.nextLine());
+	private static void tag(String tagname) {
+		System.out.println("Tag: " + tagname);
+	}
+
+	private static void attribute(String key, String value) {
+		System.out.println("Attr: " + key + " ==> " + value);
+	}
+
+	private static void text(String text) {
+		System.out.println("Text: " + text);
+	}
+
+	private static final Pattern ATTR_VALUE = Pattern.compile("\\s*=\\s*(['\"])(.*?)\\1");
+	private static final Pattern TEXT = Pattern.compile("(?:[^<]|<!--.*?-->)*");
+
+	private static void testXML(Scanner scanner) {
+		scanner.useDelimiter("<\\??|\\s*(?:[\\s=?]|(?<=>)|(?=>))");
+		while (scanner.hasNext()) {
+			text(scanner.skip(TEXT).match().group().trim());
+			tag(scanner.next());
+			for (String key = scanner.next(); !key.equals(">"); key = scanner.next()) {
+				if (key.equals("/")) {
+					continue;
+				}
+				attribute(key, scanner.skip(ATTR_VALUE).match().group(2));
+			}
 		}
-		int size = (int) new File("convector.html").length();
-		ByteBuffer buf = new FileInputStream("convector.html").getChannel().map(FileChannel.MapMode.READ_ONLY, 0, size);
-		while (buf.hasRemaining()) {
-			buf.position(buf.position() + cli.write(buf));
-		}
-		cli.shutdownOutput();
 	}
 }
