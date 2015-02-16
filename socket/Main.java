@@ -1,5 +1,4 @@
 import java.nio.*;
-import java.io.*;
 import java.nio.channels.*;
 import java.net.*;
 import java.util.*;
@@ -18,36 +17,7 @@ class Main {
 	}
 
 	public static void main(String... args) throws Exception {
-		testTagging();
-		testXML(new Scanner(System.in));
-	}
-
-	private static void tag(String tagname) {
-		System.out.println("Tag: " + tagname);
-	}
-
-	private static void attribute(String key, String value) {
-		System.out.println("Attr: " + key + " ==> " + value);
-	}
-
-	private static void text(String text) {
-		System.out.println("Text: " + text);
-	}
-
-	private static final Pattern ATTR_VALUE = Pattern.compile("\\s*=\\s*(['\"])(.*?)\\1");
-	private static final Pattern TEXT = Pattern.compile("(?:[^<]|<!--.*?-->)*");
-
-	private static void testXML(Scanner scanner) {
-		scanner.useDelimiter("<\\??|\\s*(?:[\\s=?]|(?<=>)|(?=>))");
-		while (scanner.hasNext()) {
-			text(scanner.skip(TEXT).match().group().trim());
-			tag(scanner.next());
-			for (String key = scanner.next(); !key.equals(">"); key = scanner.next()) {
-				if (key.equals("/")) {
-					continue;
-				}
-				attribute(key, scanner.skip(ATTR_VALUE).match().group(2));
-			}
-		}
+		ZalgoTest.main("1", "zalgo");
+		SAXTest.main("1", "sax");
 	}
 }
