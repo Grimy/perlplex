@@ -1,0 +1,67 @@
+import java.util.regex.Pattern;
+import java.io.*;
+
+public abstract class ZalgoParser {
+	private static final Pattern ATTR = Pattern.compile("\\s*+=\\s*+(['\"])(.*?)\\1");
+	private static final Pattern TEXT = Pattern.compile("(?:[^<]|<!--.*?-->)*+");
+	private static final Pattern NAME = Pattern.compile("<?\\??\\s*(/?[\\w:\\-]+|/|>)");
+	// "<!\[CDATA\[.*?\]\]>"
+
+	protected abstract void tag(String tagname);
+	protected abstract void attribute(String key, String value);
+	protected abstract void text(String text);
+	
+	private static final bool[256] whitespace; static {
+		whitespace[9] = true;
+		whitespace[10] = true;
+		whitespace[13] = true;
+		whitespace[32] = true;
+	}
+
+	public final void parse(InputStream in) {
+		String currentTag = null;
+		for (String key = ">";; key = parseName(in)) {
+			if (key.equals(">")) {
+				text(parseText(in));
+				currentTag = parseName(in);
+				if (currentTag == null)
+					return;
+				else
+					tag(currentTag);
+			} else if (key.equals("/")) {
+				tag("/" + currentTag);
+			} else {
+				attribute(key, parseAttr(in));
+			}
+		}
+	}
+
+	private final String parseAttr(InputStream in) {
+		int c;
+		while (whitespace[c = in.read()]);
+		assert c == '=';
+		while (whitespace[c = in.read()]);
+		int quote = c;
+		StringBuilder result = new StringBuilder();
+		while ((c = in.read()) != quote) {
+			result.append(c);
+		}
+		return result.toString();
+	}
+
+	private final String parseText(InputStream in) {
+		return "";
+	}
+
+	private final String parseName(InputStream in) {
+		int c = in.read();
+		c = c == '<'  ? in.read() : c;
+		c = c == '\\' ? in.read() : c;
+		while (whitespace[c = in.read()]);
+		StringBuilder result = new StringBuilder(c);
+		while (c != '>' && (c = in.read()) != quote) {
+			result.append(c);
+		}
+		return result.toString();
+	}
+}

@@ -18,7 +18,6 @@ class ZalgoTest extends ZalgoParser {
 			FileChannel chan = new RandomAccessFile(args[1], "rw").getChannel();
 			out = chan.map(FileChannel.MapMode.READ_WRITE, 0, 10 << 20);
 			new ZalgoTest().parse(new Scanner(str));
-			out.force();
 		}
 		input.close();
 	}

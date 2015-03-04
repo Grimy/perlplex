@@ -1,1 +1,6 @@
 *.class
+a.out
+xml/zalgo
+xml/sax
+maze
+hello

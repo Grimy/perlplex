@@ -23,7 +23,6 @@ class SAXTest extends DefaultHandler {
 			SAXParserFactory.newInstance().newSAXParser().parse(
 					new InputSource(new StringReader(str)),
 					new SAXTest());
-			out.force();
 		}
 		input.close();
 	}
