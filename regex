@@ -1,0 +1,135 @@
+#!/bin/perl -l
+
+# One Regex to rule them all, One Regex to find them,
+# One Regex to match them all and in the darkness bind them
+
+# (?:\3(?:\2(?:\1|())|())|())
+# (?(3)(?(2)(?(1)|())|())|())
+# (?(1)1)|(?(2)2)|(?(3)3)
+
+# Contrary to what is documented, (*COMMIT) and (*ACCEPT) can take an argument
+# Contrary to what is documented, the p flag can appear after a -, as in (?-p)
+# /(?(/ crashes (panic: memory wrap)
+# /(?^/ and similar patterns do not complain about unclosed parenthesis
+# /\p /, /\P /, /\p^/ and /\P^/ give strange warnings
+# /\p^ / crashes (panic: memory wrap)
+# The optimizer interacts strangely with some diagnostics (/a|\P!/ vs. /\P!|a/)
+# \N{} is ignored inside interpolated variables, but otherwise fatal
+# \o{} and \x{} have inconsistent behavior
+# /\c/ is an unsilencable warning, NOT an error
+# The undocumented (?c), (?g) and (?o) are ignored instead of erroring out
+
+use strict;
+no warnings;
+$|--;
+
+my $regex = qr~
+	(?{0}) \A (?&regex)* \z
+	(?(DEFINE)
+		(?<atom>
+			  (?!(?&quant)) [^\\|[()]
+			| \\(?&escape) (?<!\\[gk])
+			| (?>(?&class))
+			| \( (?: (?&ext) | (?{$^R+1}) ) (?&regex)* \)
+			| \( \* (*PRUNE) (?: (?:MARK)? :[^)]+ | (?:PRUNE|SKIP|THEN|COMMIT|ACCEPT) (?::[^)]*)? | F(?:AIL)? :? ) \)
+		)
+		(?<flags>   (?:\^(?![a-z]*[d-]))? (?: [cgimopsx] | a(?=[b-z]*a(?![b-z]*a)) | [adlu](?![a-z]*[adlu]) | -(?![a-z]*[adlu-]) )* )
+		(?<name>    (*PRUNE) [_A-Za-z] \w* )
+		(?<ext>     \? (?: [|>] | <?[=!] | '(?&name)' | <(?&name)> | (?&flags): ) )
+		(?<escape>
+			  [0-7]\d+
+			| N{    (*PRUNE) }
+			| [Bb]  (*PRUNE) (?!{)
+			| o     (*PRUNE) {[^}]+}
+			| x{    (*PRUNE) [^}]*}
+			| [Pp]  (*PRUNE) (*FAIL)
+			| c     (*PRUNE) (?:\z|[\0-z|-\x7F])
+			| (\d+) (*PRUNE) (?(?{$^N > $^R})(*FAIL))
+			| .
+		)
+		(?<class>   \[ \^?+ \]?+ (?: \\(?:\d|(?&escape)(?<!N)) | [^\\])*? \] )
+		(?<quant>   [*+?][+?]? | {(?=\d++,?\d*}) (?&short) ,? (?&short)?} [+?]? )
+		(?<short>   0* (?(?= [4-9]\d{4} | 3[3-9]\d{3} | 32[89]\d\d | 327[7-9]\d | 3276[7-9] ) (*PRUNE) (*FAIL) ) \d* )
+		(?<modif>   \( \? (?&flags) (?: \) | (?<!\?) \z ) )
+		(?<comment> \( \? \# [^)]* \) )
+		(?<regex>   (?&modif) | (?&comment) | (?&atom) (?&comment)* (?&quant)? | \| )
+	)
+~xs;
+
+sub test {
+	eval {/$_/};
+	my $ok = !!/$regex/;
+	print "False positive /$_/: $@" if $ok and $@;
+	print "False negative /$_/ (" . (s/./ord($&)."."/reg) . ")" if !$ok and !$@;
+}
+
+map {test} "\\p^ ", "\\c\n", "\\\n", "()"x79 . "\\80", "()"x80 . "\\80", qw~
+	\\ \\\\ \\a a\\
+	\\0 \\1 \\9 \\10 \\19 \\42 \\79 \\80 \\b \\m \\P \\g \\k \\o \\p
+	\\c1 \\ca \\c} \\c{ \\c 0\\c
+	\\p0 \\p1 \\p^ $\\p* |\\P{ |\\P} $\\p{ !\\p* _\\Pt
+	\\x0 \\xf \\xF \\xx \\x{ \\x} \\x{!} \\x{} \\x{FFFFFF}
+	\\o \\o{} \\o{!} \\o{9} \\o{7777777}
+	\\g \\g{} \\g{!} \\g{9} \\g{Zzz} (?<a>)\g{a}
+	\\k \\k{} \\k{!} \\k{9} \\k{Zzz} (?<a>)\k{a}
+	\\N \\N{} \\N{!} \\N{LATIN SMALL LETTER A}
+	\\b \\b{} \\B \\B{}
+	^ . $ ^.^ $$..^^
+	| a|b ^|$ ||.||
+	() ( ) a(b|c)d (()()(()))() (()() (()()))
+	()\\1 ()\\2 (())\\2 ()()\\1
+	[] [ ] [a] [^] [[] []] [[[] []]] [[]] [a][] [^][]
+	[\\N] [\\n] [\\P] [\\p] [\\c] [\\o] [\\1] [\\9] [\\80] [\\g] [\\k]
+	[\\N{}] [\\N{!}] [\\N{LATIN SMALL LETTER A}]
+	* a* *a \* ^* .* $* |* (* )* [* ]* (*) [*]
+	+ a+ +a \+ ^+ .+ $+ |+ (+ )+ [+ ]+ (+) [+]
+	? a? ?a \? ^? .? $? |? (? )? [? ]? (?) [?]
+	{ a{ {a \{ ^{ .{ ${ |{ ({ ){ [{ ]{ ({) [{]
+	} a} }a \} ^} .} $} |} (} )} [} ]} (}) [}]
+	a+++ a*b+cd?e
+	{} {,} {1} {,1} {1,} {1,1} {a,a} {,,}
+	.{} .{,} .{1} .{,1} .{1,} .{1,1} .{3,0} .{a,a} .{,,}
+	{32767} {32767, .{32767 {32767,32767,32767}
+	.{32766} .{0032766} .{32767} .{1,32766} .{1,32767}
+	a** a*+ a*? a+* a++ a+? a?* a?+ a??
+	a{1}* a{1}+ a{1}? a{,1}* a{1,}*
+	(?=) (?!) (?<) (?<=) (?<!) (?') (?>) (?|)
+	(?=)* (?!)(?#)+ (?)(?!)?
+	(?=()|())\\2 (?|()|())\\2
+	(?a) (?b) (?d) (?-) (?^) (?-a) (?-i) (?i-i) (?^d)
+	(?a)+ (?a:)+ a(?a)+ (?^:)? (?adlupimsx)
+	(?aa) (?aaa) (?ad) (?da) (?dl) (?ua) (?ada) (?aia) (?iii)
+	(?^a) (?^d) (?^-) (?^l) (?a-) (?u-) (?a-a) (?--) (?^^)
+	(? (?^ (?- (?c (?-p
+	(?#) (?# (?#)* a(?#)* a(?#)(?#)+ a(?)(?#)+ ((?#)) (?#()) (?a#) [(?#])]
+	(*PRUNE) (*SKIP) (*MARK) (*THEN) (*COMMIT) (*F) (*FAIL) (*ACCEPT) (*LOL)
+	(*PRUNE:) (*SKIP:) (*MARK:) (*THEN:) (*COMMIT:) (*F:) (*FAIL:) (*ACCEPT:)
+	(*PRUNE:a) (*SKIP:a) (*MARK:a) (*THEN:a) (*COMMIT:a) (*F:a) (*FAIL:a) (*ACCEPT:a)
+	(*:) (*) (*:1) (*:_) (*:) (*:a) (*:!) (*:() (*:)) (* (*:_)*+
+	(?( (?{}) (?{ (?{{}}) (?<=a*) (?<=^*) (?<=$*) (?<=\b*)
+~;
+
+# my @tokens = ("^", "-", "a".."z");
+# for my $a (@tokens) {
+	# for my $b (@tokens) {
+		# for my $c (@tokens) {
+			# for my $d (@tokens) {
+				# $_ = "(?$a$b$c$d)";
+				# test;
+			# }
+		# }
+	# }
+# }
+
+my @tokens = grep {1} map {chr} 32..127;
+
+# for my $a (@tokens) {
+	# for my $b (@tokens) {
+		# for my $c (@tokens) {
+			# for my $d (@tokens) {
+				# $_ = "$a$b$c$d";
+				# test;
+			# }
+		# }
+	# }
+# }
