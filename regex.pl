@@ -9,6 +9,7 @@
 # Contrary to what is documented, the p flag can appear after a -, as in (?-p)
 # The undocumented (?c), (?g) and (?o) are ignored instead of erroring out
 # /(?(/ crashes in 5.20 only (panic: memory wrap)
+# /(?[\ &!])/ crashes in 5.22 only (segfault)
 # /\p /, /\P /, /\p^/ and /\P^/ give strange warnings
 # The optimizer interacts strangely with some diagnostics (/a|\P!/ vs. /\P!|a/)
 # \N{} is ignored inside interpolated variables, but otherwise fatal
@@ -45,6 +46,10 @@ my $nested = $v >= 22 ? '[?+]' : $v >= 20 ? '[?]' : '(?!)';
 # my $wtf = $v == 18 ? qr/(?:(?<!(?<!\\)[.^$)])(?<!\\[ABCDGHKNRSVWXZbdhsvwz])(?:\\[89])*(*ACCEPT))?/ : '';
 
 # Since 5.18, {m,n} with m > n is accepted
+my @shorter = map "\\d{$_}<0*+\\d{$_}\\d+", 0..4;
+my @same = map "\\d{$_}<0*+\\d{$_}", 1..5;
+my @digits = map "$_\\d*<0*+\\1[${\++$_}-9]", 0..8;
+my $lt = $v >= 18 ? '' : qr/0*+ (?: @shorter | (?=@same) (\d*) (?:@digits))/x;
 
 # Since 5.18, flagsets without ) are accepted at the end of a regex (e.g. /(?^/)
 my $fend = $] >= 5.018 ? '(?(?=\z)(?<!\?)(*ACCEPT))' : '';
@@ -57,7 +62,8 @@ my $regex = qr/
 	(?<atom>
 		  (?!$quant) [^\\|[()]
 		| \\ (?&escape) (?<!\\[gk])
-		| (?&class) (*PRUNE)
+		| (?&class)
+		| \( \? \[ (?&exclass) \] \)
 		| \( (?<look> \? <? [=!] (?&regex)*) \)
 		| \( \? \( (?&cond) \) (?&branch)* \|? (?&branch)* \)
 		| \( \? (?: [+-]?\d+ | [0R] | (?:P=|P>|&)(?&name) ) \)
@@ -78,6 +84,7 @@ my $regex = qr/
 		| [Bb] (*PRUNE) $brace
 		| [Pp] (*PRUNE) $prop
 		| c    (*PRUNE) $brace $cend
+		| x             [[:xdigit:]]*
 		| .
 	)
 	(?<flag>
@@ -87,7 +94,8 @@ my $regex = qr/
 		| [adlu] (?! [a-z]* [adlu])
 		| - (?! [a-z]* [adlu-])
 	)
-	(?<class>   \[ \^?+ \]?+ (?: \\ (?&escape) (?<!N) | \[: (?=.*:]) (*PRUNE) (?&posix) :] | [^\\] )*? \] )
+	(?<class>   \[ \^?+ \]?+ (?: \\ (?&escape) (?<!N) | \[: (?=.*:]) (*PRUNE) (?&posix) :] | [^]\\] )*? \] )
+	(?<exclass> [!\s]* (?: (?&class) | \\(?&escape) | \((?&exclass)\)) \s* (?:[-+&|^] \s* (?&exclass))? )
 	(?<posix>   alpha|alnum|ascii|blank|cntrl|x?digit|graph|lower|print|punct|space|upper|word )
 	(?<cond>    (?&look) | DEFINE | R | R&(?&name) | R?[1-9]\d* | '(?&name)' | <(?&name)> )
 	(?<name>    (*PRUNE) [_A-Za-z] \w* )
@@ -96,6 +104,26 @@ my $regex = qr/
 	(?<comment> \( \? \# [^)]* \) )
 	(?<branch>  \( \? (?&flag)* $fend \) | (?&comment) | (?&atom) (?&comment)* (?:(?&quant)[+?]?)?+ (?!(?&quant)) )
 /xs;
+
+$regex = qr/
+^                                             # start of string
+(                                             # first group start
+  (?:
+    (?:[^?+*{}()[\]\\|]+                      # literals and ^, $
+     | \\.                                    # escaped characters
+     | \[ (?: \^?\\. | \^[^\\] | [^\\^] )     # character classes
+          (?: [^\]\\]+ | \\. )* \]
+     | \( (?:\?[:=!]|\?<[=!]|\?>)? (?1)?? \)  # parenthesis, with recursive content
+     | \(\? (?:R|[+-]?\d+) \)                 # recursive matching
+     )
+    (?: (?:[?+*]|\{\d+(?:,\d*)?\}) [?+]? )?   # quantifiers
+  | \|                                        # alternative
+  )*                                          # repeat content
+)                                             # end first group
+$                                             # end of string
+/xsm;
+
+print "Yay~" if $regex =~ /$regex/;
 
 sub test {
 	eval {no warnings; qr/$_/};
@@ -114,8 +142,10 @@ sub combinations {
 	(@_, $n ? map {my $c = $_; map {"$c$_"} @_} combinations($n, @_) : ());
 }
 
+my @ascii = map chr, 32..127;
+
 test for
-	'\p^ ', '\N{LATIN SMALL LETTER A}', '[\N{LATIN SMALL LETTER A}]',
+	$regex, '\p^ ', '\N{LATIN SMALL LETTER A}', '[\N{LATIN SMALL LETTER A}]',
 	map("\\" . chr, 0..255),
 	map("\\c" . chr, 0..255),
 	map(("(?$_)", "(?^$_)", "(?-$_)"), "a".."z"),
@@ -124,6 +154,7 @@ test for
 	combinations(6, qw([ ^ ])),
 	combinations(6, qw({ 1 , })),
 	map(".$_", combinations(5, qw({1} {1,} {1,1} + * ?))),
+	# map("(?[\\$_])", combinations(3, @ascii)),
 	qw~
 	!{1,0}?? !{1,1}?? !{1,2}??
 	!{01,1}?? !{1,01}?? !{10,100}??
@@ -170,9 +201,15 @@ test for
 	[[:alpha:]] [[:blah:]] [[:alpha] [[:alpha: [[:!:]] [[:]:]
 	[[:!] [[:A] [[:z] [[:1] [[:: [[::]] [[:]] [[::] [[:]
 	[[:].*yadayada: [[:].*yadayada:]
+	(?[ (?[) (?[]) (?[a]) (?[\xFF]) (?[\xFG]) (?[[]]) (?[[a]]) (?[[a])
+	(?[[a]|[b]]) (?[[a]+[b]]) (?[[a]&[b]]) (?[[a]-[b]]) (?[[a]^[b]])
+	(?[[a]|[b]&[c]) (?[[a]|([b]&[c])]) (?[([a]|[b])&[c]])
+	(?[[a]?[b]]) (?[[a]![b]]) (?[[a];[b]]) (?[[a]/[b]]) (?[[a]*[b]])
+	(?[[a]^![b]]) (?[[a]^&[b]]) (?[[a]&+[b]])
 ~;
 
 print "UNIT DONE";
+exit;
 
 # my @tokens = ("^", "-", "a".."z");
 # for my $a (@tokens) {
