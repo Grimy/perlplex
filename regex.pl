@@ -3,7 +3,7 @@
 # One Regex to rule them all, One Regex to find them,
 # One Regex to match them all and in the darkness bind them
 
-# Known limitations: Variable-length lookbehinds, references to non-existent groups
+# Known limitations: Variable-length lookbehinds, references to non-existent groups, invalid ranges
 
 # Contrary to what is documented, (*COMMIT) and (*ACCEPT) can take an argument
 # Contrary to what is documented, the p flag can appear after a -, as in (?-p)
@@ -57,18 +57,19 @@ my $regex = qr/
 	(?<atom>
 		  (?!$quant) [^\\|[()]
 		| \\ (?&escape) (?<!\\[gk])
-		| \[ \^?+ \]?+ (?: \\ (?&escape) (?<!N) | [^\\] )*? \] (*PRUNE)
+		| (?&class) (*PRUNE)
 		| \( (?<look> \? <? [=!] (?&regex)*) \)
 		| \( \? \( (?&cond) \) (?&branch)* \|? (?&branch)* \)
-		| \( \? (?: [|>0R] | [+-]?\d+ | '(?&name)' | (?&flag)*: ) (?&regex)* \)
-		| \( (?: \?P?<(?&name)> | \?(?:P=|P>|&)(?&name))? (?&regex)* \)
+		| \( \? (?: [+-]?\d+ | [0R] | (?:P=|P>|&)(?&name) ) \)
+		| \( (?: \? (?: [|>] | '(?&name)' | (?&flag)*: | P?<(?&name)>) )? (?&regex)* \)
 		| \( \* (?: (?:MARK)? :[^)]+ | F(?:AIL)? :? ) \)
 		| \( \* (?:PRUNE|SKIP|THEN|COMMIT|ACCEPT) (?::[^)]*)? \)
 	)
 	(?<escape>
 		  N (?=(?&quant))
+		| g-?\d*[1-9]
 		| N\{  (*PRUNE) }
-		| g\{  (*PRUNE) (?:\d+|(?&name))}
+		| g\{  (*PRUNE) (?:-?\d*[1-9]|(?&name))}
 		| x\{  (*PRUNE) [^}]*}
 		| k\{  (*PRUNE) (?&name)}
 		| k<   (*PRUNE) (?&name)>
@@ -86,6 +87,8 @@ my $regex = qr/
 		| [adlu] (?! [a-z]* [adlu])
 		| - (?! [a-z]* [adlu-])
 	)
+	(?<class>   \[ \^?+ \]?+ (?: \\ (?&escape) (?<!N) | \[: (?=.*:]) (*PRUNE) (?&posix) :] | [^\\] )*? \] )
+	(?<posix>   alpha|alnum|ascii|blank|cntrl|x?digit|graph|lower|print|punct|space|upper|word )
 	(?<cond>    (?&look) | DEFINE | R | R&(?&name) | R?[1-9]\d* | '(?&name)' | <(?&name)> )
 	(?<name>    (*PRUNE) [_A-Za-z] \w* )
 	(?<quant>   [*+?] | {(?=\d++,?\d*}) (*PRUNE) $zero ((?&short)) (?: (?:,$zero\g{-1})? } $nested | ,? (?&short)? } ) )
@@ -116,7 +119,7 @@ test for
 	map("\\" . chr, 0..255),
 	map("\\c" . chr, 0..255),
 	map(("(?$_)", "(?^$_)", "(?-$_)"), "a".."z"),
-	map({$a = "\\$_"; map {"$a$_"} qw({ {} } {!} {9} {99999} {FFFFFF})} "a".."z", "A".."Z"),
+	map({$a = "\\$_"; map {"$a$_"} qw({ {} } {!} 0 01 6 -0 +0 -1 {-1} {0} {9} {99999} {FFFFFF})} "a".."z", "A".."Z"),
 	combinations(9, qw(( ))),
 	combinations(6, qw([ ^ ])),
 	combinations(6, qw({ 1 , })),
@@ -127,7 +130,7 @@ test for
 	\80 \99 ()\2 (?|()|())\2 \\ a\ \07 \10 \19 \42 \79 0\c !\c
 	\p0 \p1 \p^ $\p* |\P{ |\P} $\p{ !\p* _\Pt \p)
 	\x0 \xf \xF \xx
-	\g<> \g'' \g<a> \g'zzz'
+	\g<> \g'' \g<a> \g'zzz' \gg
 	\k<> \k'' \k<a> \k'zzz'
 	\N**
 	.\8 !\8 8\8? 8\8{8} 8\8{88888} 8\8{} .{8}\8 {\8 \A\8 \E\8 \|\8 (\8) ()\8
@@ -147,11 +150,12 @@ test for
 	a{1}* a{1}+ a{1}? a{,1}* a{1,}*
 	(?=) (?!) (?<) (?<=) (?<!) (?') (?>) (?|)
 	(?P=_) (?P>_) (?P<_>) (?P'_') (?'_>) (?<_') (?<_>) (?'A') (?<7>) (?&A) (?&)
+	(?P=_/) (?P>_/) (?&_/) (?R/) (?0/)
 	(?=)* (?!)(?#)+ (?)(?!)? (?<!?)
 	(?-) (?^) (?i-i) (?a)+ (?a){1} (?a:)+ a(?a)* (?^:)? (?adlupimsx)
 	(?aa) (?aaa) (?ad) (?da) (?dl) (?ua) (?ada) (?aia) (?iii)
 	(?^-) (?a-) (?u-) (?a-a) (?--) (?^^)
-	(?^ (?- (?c (?-p
+	(?^ (?- (?c (?-p (?6 (?R (?P (?6/)
 	(?#) (?# (?#)* a(?#)* a(?#)(?#)+ a(?)(?#)+ ((?#)) (?#()) (?a#) [(?#])]
 	(*PRUNE) (*SKIP) (*MARK) (*THEN) (*COMMIT) (*F) (*FAIL) (*ACCEPT) (*LOL)
 	(*PRUNE:) (*SKIP:) (*MARK:) (*THEN:) (*COMMIT:) (*F:) (*FAIL:) (*ACCEPT:)
@@ -161,12 +165,14 @@ test for
 	(?0) (?R) (?1) (?-1) (?+1) (?-) (?+) (?7)
 	(?( (?() (?()) (?(0)) (?(1)) (?(01)) (?(42)) (?(-1)) (?(?|))
 	(?(R)) (?(?=)) (?(?!)) (?(?<=)) (?(?<!)) (?(R&D))
-	(?(<_>)) (?(P<_>)) (?('_'))
+	(?(<_>)) (?(P<_>)/) (?('_'))
 	(?(R)|) (?(R)||) (?(R)(|)|[|]) (?(DEFINE)) (?(R0)) (?(R1))
+	[[:alpha:]] [[:blah:]] [[:alpha] [[:alpha: [[:!:]] [[:]:]
+	[[:!] [[:A] [[:z] [[:1] [[:: [[::]] [[:]] [[::] [[:]
+	[[:].*yadayada: [[:].*yadayada:]
 ~;
 
 print "UNIT DONE";
-exit;
 
 # my @tokens = ("^", "-", "a".."z");
 # for my $a (@tokens) {
@@ -182,13 +188,19 @@ exit;
 
 my @tokens = grep {1} map {chr} 32..127;
 
-for my $a (@tokens) {
-	for my $b (@tokens) {
-		for my $c (@tokens) {
-			# for ("$a$b$c\\8", "$a$b\\8$c", "$a\\8$b$c", "\\8$a$b$c") {
-			for my $d (@tokens) {
-				test;
-			}
-		}
-	}
+for (1..1E7) {
+	my $a = '';
+	$a .= chr(32 + rand 96) for 1..rand(16);
+	test for "$a\\";
 }
+
+# for my $a (@tokens) {
+	# for my $b (@tokens) {
+		# for my $c (@tokens) {
+			# # for ("$a$b$c\\8", "$a$b\\8$c", "$a\\8$b$c", "\\8$a$b$c") {
+			# for my $d (@tokens) {
+				# test;
+			# }
+		# }
+	# }
+# }
