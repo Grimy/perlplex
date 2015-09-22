@@ -8,10 +8,14 @@ $" = '|';
 # Number comparison
 #######
 
-my @shorter = map "\\d{$_}<0*+\\d{$_}\\d+", 0..4;
-my @same = map "\\d{$_}<0*+\\d{$_}", 1..5;
-my @digits = map "$_\\d*<0*+\\1[${\++$_}-9]", 0..8;
-my $lt = qr/^ 0*+ (?: @shorter | (?=@same) (\d*) (?:@digits))/x;
+my @shorter = map "\\d{$_}>0*+\\d{$_}\\d+", 0..4;
+my @longer = map "\\d{$_}\\d+>0*+\\d{$_}\$", 0..4;
+my @same = map "\\d{$_}>0*+\\d{$_}\$", 1..5;
+my @lesser = map "$_\\d*>0*+\\1[${\++$_}-9]", 0..8;
+my @greater = map "$_\\d*>0*+\\1[0-${\--$_}]", 1..9;
+
+my $lt = qr/^ 0*+ (?: @shorter | (?=@same) (\d*) (?:@lesser))/x;
+my $gt = qr/^ 0*+ (?: @longer | (?=@same) (\d*) (?:@greater))/x;
 
 # my $lt = qr/^ 0*+
 	# (?: \d{0} < 0*+ \d{0}\d+
@@ -38,14 +42,15 @@ my $lt = qr/^ 0*+ (?: @shorter | (?=@same) (\d*) (?:@digits))/x;
 	  # )
 # /x;
 
-print "100<100" =~ /$lt/ ? "Yay" : "Nay";
-print "122<111" =~ /$lt/ ? "Yay" : "Nay";
-print "10<2" =~ /\d+ ( <0*+ | \d (?1) \d) $/xsm;
+print "100>100" =~ /$gt/ ? "Yay" : "Nay";
+print "122>111" =~ /$gt/ ? "Yay" : "Nay";
+print "2>10"    =~ /$gt/ ? "Yay" : "Nay";
+print "3>0"    =~ /$gt/ ? "Yay" : "Nay";
 
 for $a (0..1000) {
 	for $b (0..1000) {
-		for ("$a<$b", "0$a<$b", "$a<0$b", "0$a<0$b") {
-			die $_ if !($a < $b) != !/$lt/;
+		for ("$a>$b", "0$a>$b", "$a>0$b", "0$a>0$b") {
+			die $_ if !($a > $b) != !/$gt/;
 		}
 	}
 }

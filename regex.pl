@@ -18,6 +18,7 @@
 use strict;
 no warnings qw(qw);
 $|--;
+$" = '|';
 
 my $v = int($] * 1000 - 5000);
 
@@ -46,16 +47,19 @@ my $nested = $v >= 22 ? '[?+]' : $v >= 20 ? '[?]' : '(?!)';
 # my $wtf = $v == 18 ? qr/(?:(?<!(?<!\\)[.^$)])(?<!\\[ABCDGHKNRSVWXZbdhsvwz])(?:\\[89])*(*ACCEPT))?/ : '';
 
 # Since 5.18, {m,n} with m > n is accepted
-my @shorter = map "\\d{$_}<0*+\\d{$_}\\d+", 0..4;
-my @same = map "\\d{$_}<0*+\\d{$_}", 1..5;
-my @digits = map "$_\\d*<0*+\\1[${\++$_}-9]", 0..8;
-my $lt = $v >= 18 ? '' : qr/0*+ (?: @shorter | (?=@same) (\d*) (?:@digits))/x;
+my @longer = map "\\d{$_}\\d+,0*\\d{$_}}", 1..4;
+my @same = map "\\d{$_},0*\\d{$_}}", 1..5;
+my @digits = map "$_\\d*,0*\\g-1[0-${\--$_}]", 1..9;
+my $lt = $v >= 18 ? '' : qr/(?! @longer | (?=@same) (\d*) (?:@digits))/x;
 
 # Since 5.18, flagsets without ) are accepted at the end of a regex (e.g. /(?^/)
-my $fend = $] >= 5.018 ? '(?(?=\z)(?<!\?)(*ACCEPT))' : '';
+my $fend = $v >= 18 ? '(?(?=\z)(?<!\?)(*ACCEPT))' : '';
+
+# Before 5.18, extended character classes (?[…]) didn’t exist
+my $exclass = $v >= 18 ? '(?&exclass)' : '(?!)';
 
 # Before 5.16, invalid unicode properties were accepted (e.g. /\p!/)
-my $prop = $] >= 5.016 ? '(*FAIL)' : '(?<=\A..)\W';
+my $prop = $v >= 16 ? '(*FAIL)' : '(?<=\A..)\W';
 
 my $regex = qr/
 	\A (?<regex> (?&branch) | \| )* \z (*ACCEPT)
@@ -63,7 +67,7 @@ my $regex = qr/
 		  (?!$quant) [^\\|[()]
 		| \\ (?&escape) (?<!\\[gk])
 		| (?&class)
-		| \( \? \[ (?&exclass) \] \)
+		| \( \? \[ $exclass \] \)
 		| \( (?<look> \? <? [=!] (?&regex)*) \)
 		| \( \? \( (?&cond) \) (?&branch)* \|? (?&branch)* \)
 		| \( \? (?: [+-]?\d+ | [0R] | (?:P=|P>|&)(?&name) ) \)
@@ -99,29 +103,11 @@ my $regex = qr/
 	(?<posix>   alpha|alnum|ascii|blank|cntrl|x?digit|graph|lower|print|punct|space|upper|word )
 	(?<cond>    (?&look) | DEFINE | R | R&(?&name) | R?[1-9]\d* | '(?&name)' | <(?&name)> )
 	(?<name>    (*PRUNE) [_A-Za-z] \w* )
-	(?<quant>   [*+?] | {(?=\d++,?\d*}) (*PRUNE) $zero ((?&short)) (?: (?:,$zero\g{-1})? } $nested | ,? (?&short)? } ) )
+	(?<quant>   [*+?] | {(?=\d++,?\d*}) (*PRUNE) $zero $lt ((?&short)) (?: (?:,$zero\g{-1})? } $nested | ,? (?&short)? } ) )
 	(?<short>   (?! [4-9]\d{4} | 3[3-9]\d{3} | 32[89]\d\d | 327[7-9]\d | 3276[7-9] ) \d* )
 	(?<comment> \( \? \# [^)]* \) )
 	(?<branch>  \( \? (?&flag)* $fend \) | (?&comment) | (?&atom) (?&comment)* (?:(?&quant)[+?]?)?+ (?!(?&quant)) )
 /xs;
-
-$regex = qr/
-^                                             # start of string
-(                                             # first group start
-  (?:
-    (?:[^?+*{}()[\]\\|]+                      # literals and ^, $
-     | \\.                                    # escaped characters
-     | \[ (?: \^?\\. | \^[^\\] | [^\\^] )     # character classes
-          (?: [^\]\\]+ | \\. )* \]
-     | \( (?:\?[:=!]|\?<[=!]|\?>)? (?1)?? \)  # parenthesis, with recursive content
-     | \(\? (?:R|[+-]?\d+) \)                 # recursive matching
-     )
-    (?: (?:[?+*]|\{\d+(?:,\d*)?\}) [?+]? )?   # quantifiers
-  | \|                                        # alternative
-  )*                                          # repeat content
-)                                             # end first group
-$                                             # end of string
-/xsm;
 
 print "Yay~" if $regex =~ /$regex/;
 
@@ -180,7 +166,7 @@ test for
 	a** a*+ a*? a+* a++ a+? a?* a?+ a??
 	a{1}* a{1}+ a{1}? a{,1}* a{1,}*
 	(?=) (?!) (?<) (?<=) (?<!) (?') (?>) (?|)
-	(?P=_) (?P>_) (?P<_>) (?P'_') (?'_>) (?<_') (?<_>) (?'A') (?<7>) (?&A) (?&)
+	(?P=_) (?P>_) (?P<_>) (?P'_') (?'_>) (?<_') (?<_>) (?'A') (?<7>) (?&A)
 	(?P=_/) (?P>_/) (?&_/) (?R/) (?0/)
 	(?=)* (?!)(?#)+ (?)(?!)? (?<!?)
 	(?-) (?^) (?i-i) (?a)+ (?a){1} (?a:)+ a(?a)* (?^:)? (?adlupimsx)
@@ -197,6 +183,7 @@ test for
 	(?( (?() (?()) (?(0)) (?(1)) (?(01)) (?(42)) (?(-1)) (?(?|))
 	(?(R)) (?(?=)) (?(?!)) (?(?<=)) (?(?<!)) (?(R&D))
 	(?(<_>)) (?(P<_>)/) (?('_'))
+	(?(<>)) (?('')) (?(R&)) (?<>) (?'') (?P<>) (?&) (?P=) (?P>)
 	(?(R)|) (?(R)||) (?(R)(|)|[|]) (?(DEFINE)) (?(R0)) (?(R1))
 	[[:alpha:]] [[:blah:]] [[:alpha] [[:alpha: [[:!:]] [[:]:]
 	[[:!] [[:A] [[:z] [[:1] [[:: [[::]] [[:]] [[::] [[:]
