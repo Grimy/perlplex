@@ -1,0 +1,127 @@
+/(?[\ &!])/ segfaults
+
+How to reproduce
+----------------
+
+> perl5.23.4 -e '/(?[\ &!])/'
+
+Using any of [+-|^] instead of & yields the same results.
+
+Expected behavior
+-----------------
+
+Perl should die with the following diagnostics:
+
+> The regex_sets feature is experimental in regex; marked by <-- HERE in m/(?[ <-- HERE \ &!])/ at -e line 1.”
+> Incomplete expression within '(?[ ])' in regex; marked by <-- HERE in m/(?[\ &! <-- HERE ])/ at -e line 1.”
+
+(This was the behavior in perl5.20.2)
+
+Actual behavior
+---------------
+
+Perl is forcefully terminated by a SIGSEGV signal.
+The actual output is shell-dependant; example output with bash:
+
+> The regex_sets feature is experimental in regex; marked by <-- HERE in m/(?[ <-- HERE \ &!])/ at -e line 1.
+> Segmentation fault (core dumped)
+
+gdb gives the following backtrace:
+#0  0x000000000046face in Perl__invlist_intersection_maybe_complement_2nd ()
+#1  0x0000000000478ee6 in S_handle_regex_sets ()
+#2  0x0000000000473090 in S_reg ()
+#3  0x0000000000479fcd in S_regatom ()
+#4  0x000000000047c537 in S_regbranch ()
+#5  0x00000000004720ab in S_reg ()
+#6  0x00000000004866e1 in Perl_re_op_compile ()
+#7  0x00000000004366e8 in Perl_pmruntime ()
+#8  0x0000000000466ced in Perl_yyparse ()
+#9  0x0000000000441377 in perl_parse ()
+#10 0x000000000041fc10 in main ()
+
+Affected versions
+-----------------
+
+Current blead (2d9b5f101563ac9fee41e6ca496f79db6222d2e3) is affected.
+perl5.22.0 is affected
+perl5.20.2 is NOT affected
+
+================================================================================
+
+Regression: \N{} is incorrectly ignored in regexes
+
+How to reproduce
+----------------
+
+> perl5.23.4 -e 'print /[\N{}]/'
+
+Expected behavior
+-----------------
+
+Perl should die with either of the following diagnostics:
+
+> Unknown charname '' at -e line 1, within pattern
+
+(This was the behavior in perl5.20.2)
+
+> Zero length \N{} in regex; marked by <-- HERE in m/\N{} <-- HERE / at -e line 1.”
+
+(This mimics the current behavior for /(?[\N{}])/)
+
+Actual behavior
+---------------
+
+[\N{}] is treated as an empty character class.
+Perl terminates normally and prints nothing.
+
+Affected versions
+-----------------
+
+Current blead (2d9b5f101563ac9fee41e6ca496f79db6222d2e3) is affected.
+perl5.22.0 is NOT affected
+perl5.20.2 is NOT affected
+
+===============================================================================
+
+/(?i/ and similar should raise an error
+
+How to reproduce
+----------------
+
+> perl5.23.4 -e '/(?i/'
+
+Using any recognized flag or combination of flags (for example, /(?a-x/, /(?^/)
+instead of i yields the same results.
+
+Expected behavior
+-----------------
+
+Perl should die with the following diagnostic:
+
+> Sequence (?i... not terminated in regex; marked by <-- HERE in m/(?& <-- HERE / at -e line 1.
+
+Actual behavior
+---------------
+
+Perl terminates normally and prints nothing.
+
+Affected versions
+-----------------
+
+Current blead (2d9b5f101563ac9fee41e6ca496f79db6222d2e3) is affected.
+perl5.22.0 is affected
+perl5.20.2 is affected
+perl5.18.4 is affected
+
+===============================================================================
+
+perlre: (?n) should be documented
+
+perl5.22 introduced the /n regex modifier. /(?n)/ works as expected, but isn’t
+documented. At minimum, all occurences of “imsx” in perlre.pod should be
+replaced with “imnsx”. Other documentation changes may be necessary.
+
+===============================================================================
+
+TODO
+'eval {/$_/}, print $@ for "]]]]]]]]][\\\\", "]]]]][\\\\"'

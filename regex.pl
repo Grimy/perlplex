@@ -10,17 +10,24 @@
 # The undocumented (?c), (?g) and (?o) are ignored instead of erroring out
 # /(?(/ crashes in 5.20 only (panic: memory wrap)
 # /(?[\ &!])/ crashes in 5.22 only (segfault)
+# /(?[\c#])/, /(?[\c[])/ /(?[\c]])/ and /(?[\c\])/ are (incorrectly?) rejected
 # /\p /, /\P /, /\p^/ and /\P^/ give strange warnings
 # The optimizer interacts strangely with some diagnostics (/a|\P!/ vs. /\P!|a/)
 # \N{} is ignored inside interpolated variables, but otherwise fatal
 # \o{} and \x{} have inconsistent behavior
+# /(?[(\c])/ is somehow accepted, but not /(?[\c]])/
 
 use strict;
+use warnings;
 no warnings qw(qw);
+
 $|--;
 $" = '|';
 
 my $v = int($] * 1000 - 5000);
+
+# Before 5.23, \C was accepted
+my $C = $v >= 23 ? 'C' : '';
 
 # Before 5.22, \c at the end of a regex was accepted
 # Before 5.22, \c followed by an ASCII control char was accepted
@@ -39,8 +46,8 @@ my $quant = $v >= 22 ? '[*+?]' : '(?&quant)';
 # Before 5.20, \c{, \b{ and \B{ were accepted
 my $brace = $v >= 20 ? '(?!{)' : '';
 
-# Since 5.20, nested quantifiers are sometimes accepted. It got worse in 5.22.
-my $nested = $v >= 22 ? '[?+]' : $v >= 20 ? '[?]' : '(?!)';
+# Since 5.20, nested quantifiers are sometimes accepted.
+my $nested = $v == 23 ? '[?]' : $v == 22 ? '[?+]' : $v >= 20 ? '[?+]' : '(?!)';
 
 # In 5.18 only, \8 is accepted under weird conditions
 # Trying to emulate this bug yields a SEGFAULT
@@ -59,25 +66,25 @@ my $fend = $v >= 18 ? '(?(?=\z)(?<!\?)(*ACCEPT))' : '';
 my $exclass = $v >= 18 ? '(?&exclass)' : '(?!)';
 
 # Before 5.16, invalid unicode properties were accepted (e.g. /\p!/)
-my $prop = $v >= 16 ? '(*FAIL)' : '(?<=\A..)\W';
+my $prop = $v >= 16 ? '(?!)' : '(?<=\A..)\W';
 
 my $regex = qr/
 	\A (?<regex> (?&branch) | \| )* \z (*ACCEPT)
 	(?<atom>
 		  (?!$quant) [^\\|[()]
-		| \\ (?&escape) (?<!\\[gk])
+		| \\ (?: (?&escape) | [^gk$C] )
 		| (?&class)
 		| \( \? \[ $exclass \] \)
 		| \( (?<look> \? <? [=!] (?&regex)*) \)
 		| \( \? \( (?&cond) \) (?&branch)* \|? (?&branch)* \)
-		| \( \? (?: [+-]?\d+ | [0R] | (?:P=|P>|&)(?&name) ) \)
+		| \( \? (?: [+-]?[1-9]\d* | [0R] | (?:P=|P>|&)(?&name) ) \)
 		| \( (?: \? (?: [|>] | '(?&name)' | (?&flag)*: | P?<(?&name)>) )? (?&regex)* \)
 		| \( \* (?: (?:MARK)? :[^)]+ | F(?:AIL)? :? ) \)
 		| \( \* (?:PRUNE|SKIP|THEN|COMMIT|ACCEPT) (?::[^)]*)? \)
 	)
 	(?<escape>
 		  N (?=(?&quant))
-		| g-?\d*[1-9]
+		| g(?=-?\d*[1-9])
 		| N\{  (*PRUNE) }
 		| g\{  (*PRUNE) (?:-?\d*[1-9]|(?&name))}
 		| x\{  (*PRUNE) [^}]*}
@@ -88,8 +95,9 @@ my $regex = qr/
 		| [Bb] (*PRUNE) $brace
 		| [Pp] (*PRUNE) $prop
 		| c    (*PRUNE) $brace $cend
-		| x             [[:xdigit:]]*
-		| .
+		| x [[:xdigit:]]{2}
+		| [0-7]{3}
+		| [DHSVW_adefhnrstvw]
 	)
 	(?<flag>
 		  [$flags]
@@ -98,8 +106,9 @@ my $regex = qr/
 		| [adlu] (?! [a-z]* [adlu])
 		| - (?! [a-z]* [adlu-])
 	)
-	(?<class>   \[ \^?+ \]?+ (?: \\ (?&escape) (?<!N) | \[: (?=.*:]) (*PRUNE) (?&posix) :] | [^]\\] )*? \] )
-	(?<exclass> [!\s]* (?: (?&class) | \\(?&escape) | \((?&exclass)\)) \s* (?:[-+&|^] \s* (?&exclass))? )
+	(?<class>   \[ \^?+ \]?+ (?: \\ (?: (?&escape) | [^N] ) | (?&posx) | [^]\\] )*? \] )
+	(?<exclass> [!\s]* (?: (?&class) | \\ (?: (?&escape) (?<!\\B) | \W ) | \((?&exclass)\)) \s* (?:[-+&|^] \s* (?&exclass))? )
+	(?<posx>    \[ ([:=.]) (?= .* (?<!(?=\g-1)(?<!\[).) \g-1] ) (*PRUNE) (?<=:) \^? (?&posix) :] )
 	(?<posix>   alpha|alnum|ascii|blank|cntrl|x?digit|graph|lower|print|punct|space|upper|word )
 	(?<cond>    (?&look) | DEFINE | R | R&(?&name) | R?[1-9]\d* | '(?&name)' | <(?&name)> )
 	(?<name>    (*PRUNE) [_A-Za-z] \w* )
@@ -112,6 +121,7 @@ my $regex = qr/
 print "Yay~" if $regex =~ /$regex/;
 
 sub test {
+	return if $_ eq '(?[\N{}])';
 	eval {no warnings; qr/$_/};
 	my $me = !!/$regex/;
 	my $perl = $@ !~ /^(?!Reference to nonexistent )./;
@@ -132,90 +142,76 @@ my @ascii = map chr, 32..127;
 
 test for
 	$regex, '\p^ ', '\N{LATIN SMALL LETTER A}', '[\N{LATIN SMALL LETTER A}]',
-	map("\\" . chr, 0..255),
+	map("\\" . chr, 0..31, 128..255),
 	map("\\c" . chr, 0..255),
-	map(("(?$_)", "(?^$_)", "(?-$_)"), "a".."z"),
-	map({$a = "\\$_"; map {"$a$_"} qw({ {} } {!} 0 01 6 -0 +0 -1 {-1} {0} {9} {99999} {FFFFFF})} "a".."z", "A".."Z"),
+	map("[\\$_]", @ascii),
+	map({$a = "\\$_"; map {"$a$_"} qw({ {} } {!} 0 01 6 -0 +0 -1 {-1} {0} {9} {99999} {FFFFFF})} "a", "b", "d".."z", "A".."Z"),
 	combinations(9, qw(( ))),
 	combinations(6, qw([ ^ ])),
 	combinations(6, qw({ 1 , })),
+	combinations(2, @ascii),
 	map(".$_", combinations(5, qw({1} {1,} {1,1} + * ?))),
-	# map("(?[\\$_])", combinations(3, @ascii)),
+	map("(?$_)", combinations(2, @ascii)),
+	map("(?[$_])", combinations(3, @ascii)),
+	map(split(' ', "[$_] [$_$_] [[$_] [[$_$_] [[$_]] [[$_$_]] [1[$_$_]] [[2$_$_]] [[$_]$_]] [[$_$_$_]] [[$_$_$_$_]] [[$_\[$_$_]] [[$_]$_$_]]"), qw(: = .)),
 	qw~
 	!{1,0}?? !{1,1}?? !{1,2}??
 	!{01,1}?? !{1,01}?? !{10,100}??
-	\80 \99 ()\2 (?|()|())\2 \\ a\ \07 \10 \19 \42 \79 0\c !\c
-	\p0 \p1 \p^ $\p* |\P{ |\P} $\p{ !\p* _\Pt \p)
-	\x0 \xf \xF \xx
-	\g<> \g'' \g<a> \g'zzz' \gg
-	\k<> \k'' \k<a> \k'zzz'
+	\80 \99 ()\2 (?|()|())\2 \07 \10 \19 \42 \79 0\c !\c
+	\000 \100 \777 \789 \800
+	\p1 \p^ $\p* |\P{ |\P} $\p{ !\p* _\Pt \p)
+	\xf \xF \xx \x{Invalid)\}++
+	\g<> \g'' \g<a> \g'zzz' \gg \g{1}*+
+	\k<> \k'' \k<a> \k'zzz' \kk \k{1}*+
 	\N**
 	.\8 !\8 8\8? 8\8{8} 8\8{88888} 8\8{} .{8}\8 {\8 \A\8 \E\8 \|\8 (\8) ()\8
-	. $ ^.^ $$..^^ | a|b ^|$ ||.|| a(b|c)d [a] [a][]
+	^.^ $$..^^ a|b ^|$ ||.|| a(b|c)d [a] [a][]
 	[\N] [\n] [\P] [\p] [\c] [\o] [\1] [\9] [\80] [\g] [\k] [\N{}] [\N{!}]
-	* a* *a ^* $* |* (* )* [* ]* (*) [*]
-	+ a+ +a ^+ $+ |+ (+ )+ [+ ]+ (+) [+]
-	? a? ?a ^? $? |? (? )? [? ]? (?) [?]
-	a{ {a ^{ ${ |{ ({ ){ [{ ]{ ({) [{]
-	a} }a ^} $} |} (} )} [} ]} (}) [}]
-	a+++ a*b+cd?e .{ .}
+	(*) [*] (+) [+] (?) [?]
+	({) [{] (}) [}]
+	a+++ a*b+cd?e
 	{a,a} .{} .{,} .{,1} .{1,1,} .{3,0} .{a,a} .{,,}
 	.{0} .{00} .{01} .{0032766} .{032767} .{1,32766} .{1,32767}
 	{32767} {32767, .{32767 {32767,32767,32767}
 	.{32766} .{32767} .{32770} .{32800} .{33000} .{40000}
 	a** a*+ a*? a+* a++ a+? a?* a?+ a??
 	a{1}* a{1}+ a{1}? a{,1}* a{1,}*
-	(?=) (?!) (?<) (?<=) (?<!) (?') (?>) (?|)
-	(?P=_) (?P>_) (?P<_>) (?P'_') (?'_>) (?<_') (?<_>) (?'A') (?<7>) (?&A)
-	(?P=_/) (?P>_/) (?&_/) (?R/) (?0/)
+	(?P=_) (?P>_) (?P<_>) (?P'_') (?'_>) (?<_') (?<_>) (?'A') (?<7>)
+	(?P=_/) (?P>_/) (?&_/)
 	(?=)* (?!)(?#)+ (?)(?!)? (?<!?)
-	(?-) (?^) (?i-i) (?a)+ (?a){1} (?a:)+ a(?a)* (?^:)? (?adlupimsx)
-	(?aa) (?aaa) (?ad) (?da) (?dl) (?ua) (?ada) (?aia) (?iii)
-	(?^-) (?a-) (?u-) (?a-a) (?--) (?^^)
-	(?^ (?- (?c (?-p (?6 (?R (?P (?6/)
-	(?#) (?# (?#)* a(?#)* a(?#)(?#)+ a(?)(?#)+ ((?#)) (?#()) (?a#) [(?#])]
+	(?i-i) (?a)+ (?a){1} (?a:)+ a(?a)* (?^:)? (?adlupimsx)
+	(?aaa) (?ada) (?aia) (?iii) (?a-a)
+	(?^ (?- (?c (?-p (?6 (?R (?P
+	(?# (?#)* a(?#)* a(?#)(?#)+ a(?)(?#)+ ((?#)) (?#()) [(?#])]
 	(*PRUNE) (*SKIP) (*MARK) (*THEN) (*COMMIT) (*F) (*FAIL) (*ACCEPT) (*LOL)
 	(*PRUNE:) (*SKIP:) (*MARK:) (*THEN:) (*COMMIT:) (*F:) (*FAIL:) (*ACCEPT:)
 	(*PRUNE:a) (*SKIP:a) (*MARK:a) (*THEN:a) (*COMMIT:a) (*F:a) (*FAIL:a) (*ACCEPT:a)
 	(*:) (*:1) (*:_) (*:a) (*:!) (*:() (*:)) (*:_)*+
-	(?{}) (?{ (?{{}}) (?<=^*) (?<=$*)
-	(?0) (?R) (?1) (?-1) (?+1) (?-) (?+) (?7)
-	(?( (?() (?()) (?(0)) (?(1)) (?(01)) (?(42)) (?(-1)) (?(?|))
+	(?{ (?{{}}) (?<=^*) (?<=$*)
+	(?( (?(0)) (?(1)) (?(01)) (?(42)) (?(-1)) (?(?|))
 	(?(R)) (?(?=)) (?(?!)) (?(?<=)) (?(?<!)) (?(R&D))
 	(?(<_>)) (?(P<_>)/) (?('_'))
-	(?(<>)) (?('')) (?(R&)) (?<>) (?'') (?P<>) (?&) (?P=) (?P>)
+	(?(<>)) (?('')) (?(R&)) (?P<>)
 	(?(R)|) (?(R)||) (?(R)(|)|[|]) (?(DEFINE)) (?(R0)) (?(R1))
-	[[:alpha:]] [[:blah:]] [[:alpha] [[:alpha: [[:!:]] [[:]:]
-	[[:!] [[:A] [[:z] [[:1] [[:: [[::]] [[:]] [[::] [[:]
+	[:alpha:] [[:alpha:]] [[:^alpha:]] [[:blah:]] [[:alpha] [[:alpha: [[:!:]] [[:]:]
+	[[:ascii::]] [[.span-ll.]] [[=e=]]
 	[[:].*yadayada: [[:].*yadayada:]
-	(?[ (?[) (?[]) (?[a]) (?[\xFF]) (?[\xFG]) (?[[]]) (?[[a]]) (?[[a])
+	(?[ (?[a]) (?[\xFF]) (?[\xFG]) (?[[]]) (?[[a]]) (?[[a])
 	(?[[a]|[b]]) (?[[a]+[b]]) (?[[a]&[b]]) (?[[a]-[b]]) (?[[a]^[b]])
 	(?[[a]|[b]&[c]) (?[[a]|([b]&[c])]) (?[([a]|[b])&[c]])
 	(?[[a]?[b]]) (?[[a]![b]]) (?[[a];[b]]) (?[[a]/[b]]) (?[[a]*[b]])
 	(?[[a]^![b]]) (?[[a]^&[b]]) (?[[a]&+[b]])
+	(?[[:word:]]) (?[[[:word:]]])
 ~;
 
 print "UNIT DONE";
-exit;
-
-# my @tokens = ("^", "-", "a".."z");
-# for my $a (@tokens) {
-	# for my $b (@tokens) {
-		# for my $c (@tokens) {
-			# for my $d (@tokens) {
-				# $_ = "(?$a$b$c$d)";
-				# test;
-			# }
-		# }
-	# }
-# }
 
 my @tokens = grep {1} map {chr} 32..127;
 
 for (1..1E7) {
 	my $a = '';
 	$a .= chr(32 + rand 96) for 1..rand(16);
-	test for "$a\\";
+	test for "$a";
 }
 
 # for my $a (@tokens) {
