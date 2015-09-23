@@ -3,7 +3,11 @@
 # One Regex to rule them all, One Regex to find them,
 # One Regex to match them all and in the darkness bind them
 
-# Known limitations: Variable-length lookbehinds, references to non-existent groups, invalid ranges
+# Known limitations:
+# Variable-length lookbehinds
+# References to non-existent groups
+# Invalid ranges
+# (?x)
 
 # Contrary to what is documented, (*COMMIT) and (*ACCEPT) can take an argument
 # Contrary to what is documented, the p flag can appear after a -, as in (?-p)
@@ -23,7 +27,7 @@ no warnings qw(qw);
 
 $|--;
 $" = '|';
-
+my @ascii = map chr, 32..127;
 my $v = int($] * 1000 - 5000);
 
 # Before 5.23, \C was accepted
@@ -112,7 +116,7 @@ my $regex = qr/
 		| - (?! [a-z]* [adlu-])
 	)
 	(?<class>   \[ \^?+ \]?+ (?: \\ (?: (?&escape) | [^N] ) | (?&posx) | [^]\\] )*? \] )
-	(?<exclass> [!\s]* (?: (?&class) | \\ (?: (?&escape) (?<!\\B) | \W ) | \((?&exclass)\)) \s* (?:[-+&|^] \s* (?&exclass))? )
+	(?<exclass> [!\s]* (?: (?&posx) | (?&class) | \\ (?: (?&escape) (?<!\\B) | \W ) | \((?&exclass)\)) \s* (?:[-+&|^] \s* (?&exclass))? )
 	(?<posx>    \[ ([:=.]) (?= .* (?<!(?=\g-1)(?<!\[).) \g-1] ) (*PRUNE) (?<=:) \^? (?&posix) :] )
 	(?<posix>   alpha|alnum|ascii|blank|cntrl|x?digit|graph|lower|print|punct|space|upper|word )
 	(?<cond>    (?&look) | DEFINE | R | R&(?&name) | R?[1-9]\d* | '(?&name)' | <(?&name)> )
@@ -123,10 +127,8 @@ my $regex = qr/
 	(?<branch>  \( \? (?&flag)* $fend \) | (?&comment) | (?&atom) (?&comment)* (?:(?&quant)[+?]?)?+ (?!(?&quant)) )
 /xs;
 
-print "Yay~" if $regex =~ /$regex/;
-
 sub test {
-	return if $_ eq '(?[\N{}])';
+	return if $_ =~ /\Q(?[\N{}])/;
 	return if /\(\?\[\s*\(\s*\)\s*\]\)/;
 	eval {no warnings; qr/$_/};
 	my $me = !!/$regex/;
@@ -139,28 +141,25 @@ sub test {
 # "()"x80 . "\\80";
 # qw((?<=a*) (?<=\b*) ()\\1 (())\\2 ()()\\1 (?=()|())\\2);
 
-sub combinations {
+sub testall {
 	my $n = shift() - 1;
-	(@_, $n ? map {my $c = $_; map {"$c$_"} @_} combinations($n, @_) : ());
+	my $prefix = shift;
+	my $suffix = shift;
+	if ($n) {
+		testall($n, "$prefix$_", $suffix, @_) for @_;
+	}
+	test for map "$prefix$_$suffix", @_;
 }
-
-my @ascii = map chr, 32..127;
 
 test for
 	$regex, '\p^ ', '\N{LATIN SMALL LETTER A}', '[\N{LATIN SMALL LETTER A}]',
+	'(?[[ ]])',
 	map("\\" . chr, 0..31, 128..255),
 	map("\\c" . chr, 0..255),
 	map("[\\$_]", @ascii),
 	map({$a = "\\$_"; map {"$a$_"} qw({ {} } {!} 0 01 6 -0 +0 -1 {-1} {0} {9} {99999} {FFFFFF})} "a", "b", "d".."z", "A".."Z"),
-	combinations(9, qw(( ))),
-	combinations(6, qw([ ^ ])),
-	combinations(6, qw({ 1 , })),
-	combinations(2, @ascii),
-	map(".$_", combinations(5, qw({1} {1,} {1,1} + * ?))),
-	map("(?$_)", combinations(2, @ascii)),
-	map("(?[$_])", combinations(2, @ascii)),
 	map(("[=$_=]", "[=^$_=]", "[:$_:]", "[:^$_:]", "[.$_.]", "[.^$_.]"), qw(A z 0 1 9 ! ^ = : . [ ])),
-	map(split(' ', "[$_] [$_$_] [$_!$_] [[$_] [[$_$_] [[$_]] [[$_$_]] [1[$_$_]] [[2$_$_]] [[$_]$_]] [[$_$_$_]] [[$_$_$_$_]] [[$_\[$_$_]] [[$_]$_$_]]"), qw(: = .)),
+	map(split(' ', "[$_] [$_$_] [$_!$_] [[$_] [[$_$_] [[$_]] [[$_$_]] [1[$_$_]] [[2$_$_]] [[$_]$_]] [[$_$_$_]] [[$_$_$_$_]] [[$_\[$_$_]] [[$_]$_$_]] (?[[$_$_]])"), qw(: = .)),
 	map(("(?[[:$_:]])", "[[:$_:]]", "[[:^$_:]]"), qw(alpha alnum ascii blank cntrl digit graph lower print punct space upper word xdigit invalid)),
 	qw~
 	!{1,0}?? !{1,1}?? !{1,2}??
@@ -170,8 +169,7 @@ test for
 	\p1 \p^ $\p* |\P{ |\P} $\p{ !\p* _\Pt \p)
 	\xf \xF \xx \x{Invalid)\}++
 	\g<> \g'' \g<a> \g'zzz' \gg \g{1}*+
-	\k<> \k'' \k<a> \k'zzz' \kk \k{1}*+
-	\N**
+	\k<> \k'' \k<a> \k'zzz' \kk \k{1}*+ \N**
 	.\8 !\8 8\8? 8\8{8} 8\8{88888} 8\8{} .{8}\8 {\8 \A\8 \E\8 \|\8 (\8) ()\8
 	^.^ $$..^^ a|b ^|$ ||.|| a(b|c)d [a] [a][]
 	[\N] [\n] [\P] [\p] [\c] [\o] [\1] [\9] [\80] [\g] [\k] [\N{}] [\N{!}]
@@ -211,7 +209,16 @@ test for
 	(?[[a]^![b]]) (?[[a]^&[b]]) (?[[a]&+[b]])
 	(?[[[:word:]]]) (?[[:word:]])
 	(?[(\c]) (?[[ ]]) (?[\c#]) (?[\c[]) (?[\c\]) (?[\c]])
+	(?[[a](?#)]) (?[[a](?#])])
 ~;
+
+testall 12, "", "", qw(( ));
+testall 8, "", "", qw([ ^ ]);
+testall 8, "", "", qw({ 1 , });
+testall 5, ".", "", qw({1} {1,} {1,1} + * ?);
+testall 2, "", "", @ascii;
+testall 4, "(?", ")", @ascii;
+testall 4, "(?[", "])", @ascii;
 
 print "UNIT DONE";
 exit;

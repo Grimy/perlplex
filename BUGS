@@ -159,3 +159,55 @@ perl5.20.3 is affected.
 perl5.18.4 is affected.
 perl5.16.3 is affected.
 perl5.14.4 is affected.
+
+===============================================================================
+
+regex: \c inside (?[]) causes panics and unexpected behavior
+
+Here are my findings:
+* /(?[(\c]) / panics: Read past end of '(?[ ])'.
+  It should report a syntax error.
+
+* /(?[\c#])/, /(?[\c[])/, /(?[\c\])/ and /(?[\c]])/ all report a syntax error.
+  They should each match a single control character.
+
+* /(?[(\c])/ matches a single "\c]".
+  It should report a syntax error.
+
+* /(?[(\c]) ]\b/ behaves like /\c]b/.
+  It should report a syntax error.
+
+* /(?[\c[]](])/ behaves like /\c[\]/.
+  It should report a syntax error.
+
+* /(?[\c#]
+])/ (literal newline inside) panics: reg_node overrun trying to emit 0, 171b5f4>=171b5f0
+  It should report a syntax error.
+
+All of these bugs were found on the current blead (2d9b5f101563ac9fee41e6ca496f79db6222d2e3).
+All but the last one were also present in 5.20.2.
+
+===============================================================================
+
+/(.(?2))((?<=(?=(?1)).))/ hangs and eats all available RAM
+
+How to reproduce
+----------------
+
+> perl5.23.4 -e '/(.(?2))((?<=(?=(?1)).))/'
+
+Expected behavior
+-----------------
+
+Perl should immediately die with the following diagnostic:
+
+> Infinite recursion in regex at -e line 1.
+
+This is the current behavior of almost everything that would cause a regex to
+never complete, creating the expectation that the regex engine is safe from
+this kind of problem.
+
+Actual behavior
+---------------
+
+Perl becomes unresponsive, allocating more and more RAM 
