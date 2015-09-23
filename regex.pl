@@ -47,7 +47,7 @@ my $quant = $v >= 22 ? '[*+?]' : '(?&quant)';
 my $brace = $v >= 20 ? '(?!{)' : '';
 
 # Since 5.20, nested quantifiers are sometimes accepted.
-my $nested = $v == 23 ? '[?]' : $v == 22 ? '[?+]' : $v >= 20 ? '[?+]' : '(?!)';
+my $nested = $v == 23 ? '[?]' : $v == 22 ? '[?+]' : $v >= 20 ? '[?]' : '(?!)';
 
 # In 5.18 only, \8 is accepted under weird conditions
 # Trying to emulate this bug yields a SEGFAULT
@@ -65,13 +65,18 @@ my $fend = $v >= 18 ? '(?(?=\z)(?<!\?)(*ACCEPT))' : '';
 # Before 5.18, extended character classes (?[…]) didn’t exist
 my $exclass = $v >= 18 ? '(?&exclass)' : '(?!)';
 
+# Before 5.18, [=\w*=] was an error
+my $posix = $v >= 18 ? '' : '\[ ([=.]) \w* \g-1 \] (*PRUNE) (*FAIL) |';
+
+# Before 5.18, /(?&)/, /(?P>)/, /(?(<>))/, /(?(''))/, and /(?(R&))/ were accepted
+
 # Before 5.16, invalid unicode properties were accepted (e.g. /\p!/)
-my $prop = $v >= 16 ? '(?!)' : '(?<=\A..)\W';
+my $prop = $v >= 16 ? '(?!)' : '(?:{(*PRUNE)[^}]+}|.)';
 
 my $regex = qr/
 	\A (?<regex> (?&branch) | \| )* \z (*ACCEPT)
 	(?<atom>
-		  (?!$quant) [^\\|[()]
+		  $posix (?!$quant) [^\\|[()]
 		| \\ (?: (?&escape) | [^gk$C] )
 		| (?&class)
 		| \( \? \[ $exclass \] \)
@@ -122,6 +127,7 @@ print "Yay~" if $regex =~ /$regex/;
 
 sub test {
 	return if $_ eq '(?[\N{}])';
+	return if /\(\?\[\s*\(\s*\)\s*\]\)/;
 	eval {no warnings; qr/$_/};
 	my $me = !!/$regex/;
 	my $perl = $@ !~ /^(?!Reference to nonexistent )./;
@@ -152,8 +158,10 @@ test for
 	combinations(2, @ascii),
 	map(".$_", combinations(5, qw({1} {1,} {1,1} + * ?))),
 	map("(?$_)", combinations(2, @ascii)),
-	map("(?[$_])", combinations(3, @ascii)),
-	map(split(' ', "[$_] [$_$_] [[$_] [[$_$_] [[$_]] [[$_$_]] [1[$_$_]] [[2$_$_]] [[$_]$_]] [[$_$_$_]] [[$_$_$_$_]] [[$_\[$_$_]] [[$_]$_$_]]"), qw(: = .)),
+	map("(?[$_])", combinations(2, @ascii)),
+	map(("[=$_=]", "[=^$_=]", "[:$_:]", "[:^$_:]", "[.$_.]", "[.^$_.]"), qw(A z 0 1 9 ! ^ = : . [ ])),
+	map(split(' ', "[$_] [$_$_] [$_!$_] [[$_] [[$_$_] [[$_]] [[$_$_]] [1[$_$_]] [[2$_$_]] [[$_]$_]] [[$_$_$_]] [[$_$_$_$_]] [[$_\[$_$_]] [[$_]$_$_]]"), qw(: = .)),
+	map(("(?[[:$_:]])", "[[:$_:]]", "[[:^$_:]]"), qw(alpha alnum ascii blank cntrl digit graph lower print punct space upper word xdigit invalid)),
 	qw~
 	!{1,0}?? !{1,1}?? !{1,2}??
 	!{01,1}?? !{1,01}?? !{10,100}??
@@ -193,7 +201,7 @@ test for
 	(?(<_>)) (?(P<_>)/) (?('_'))
 	(?(<>)) (?('')) (?(R&)) (?P<>)
 	(?(R)|) (?(R)||) (?(R)(|)|[|]) (?(DEFINE)) (?(R0)) (?(R1))
-	[:alpha:] [[:alpha:]] [[:^alpha:]] [[:blah:]] [[:alpha] [[:alpha: [[:!:]] [[:]:]
+	[:alpha:] [[:blah:]] [[:alpha] [[:alpha: [[:!:]] [[:]:]
 	[[:ascii::]] [[.span-ll.]] [[=e=]]
 	[[:].*yadayada: [[:].*yadayada:]
 	(?[ (?[a]) (?[\xFF]) (?[\xFG]) (?[[]]) (?[[a]]) (?[[a])
@@ -201,12 +209,12 @@ test for
 	(?[[a]|[b]&[c]) (?[[a]|([b]&[c])]) (?[([a]|[b])&[c]])
 	(?[[a]?[b]]) (?[[a]![b]]) (?[[a];[b]]) (?[[a]/[b]]) (?[[a]*[b]])
 	(?[[a]^![b]]) (?[[a]^&[b]]) (?[[a]&+[b]])
-	(?[[:word:]]) (?[[[:word:]]])
+	(?[[[:word:]]]) (?[[:word:]])
+	(?[(\c]) (?[[ ]]) (?[\c#]) (?[\c[]) (?[\c\]) (?[\c]])
 ~;
 
 print "UNIT DONE";
-
-my @tokens = grep {1} map {chr} 32..127;
+exit;
 
 for (1..1E7) {
 	my $a = '';
@@ -214,11 +222,11 @@ for (1..1E7) {
 	test for "$a";
 }
 
-# for my $a (@tokens) {
-	# for my $b (@tokens) {
-		# for my $c (@tokens) {
+# for my $a (@ascii) {
+	# for my $b (@ascii) {
+		# for my $c (@ascii) {
 			# # for ("$a$b$c\\8", "$a$b\\8$c", "$a\\8$b$c", "\\8$a$b$c") {
-			# for my $d (@tokens) {
+			# for my $d (@ascii) {
 				# test;
 			# }
 		# }

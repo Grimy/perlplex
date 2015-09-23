@@ -123,5 +123,39 @@ replaced with “imnsx”. Other documentation changes may be necessary.
 
 ===============================================================================
 
-TODO
-'eval {/$_/}, print $@ for "]]]]]]]]][\\\\", "]]]]][\\\\"'
+regex: Using "]]]]][\\" as a pattern should raise an error
+
+How to reproduce
+----------------
+
+> perl5.23.4 -e 'eval {/$_/}, print "$_ ==> ", $@ || "OK!\n" for "]]]]]]]]][\\", "]]]]][\\"'
+
+Expected behavior
+-----------------
+
+]]]]]]]]][\ ==> Unmatched [ in regex; marked by <-- HERE in m/]]]]]]]]][ <-- HERE \/ at -e line 1.
+]]]]][\ ==> Unmatched [ in regex; marked by <-- HERE in m/]]]]][ <-- HERE \/ at -e line 1.
+
+Actual behavior
+---------------
+
+]]]]]]]]][\ ==> Unmatched [ in regex; marked by <-- HERE in m/]]]]]]]]][ <-- HERE \/ at -e line 1.
+]]]]][\ ==> OK!
+
+"]]]]][\\" fails to raise an error. Note that this does not happen if we remove
+of modify the first pattern, "]]]]]]]]][\\". Thus, this bug seems to involve
+some leftover state in the regex engine.
+
+Other combinations of regexes can trigger this bug. It happens regularly when
+trying millions of randomly generated regexes. All occurences have in common
+the unclosed character class and the final backslash; other details vary.
+
+Affected versions
+-----------------
+
+Current blead (2d9b5f101563ac9fee41e6ca496f79db6222d2e3) is affected.
+perl5.22.0 is affected.
+perl5.20.3 is affected.
+perl5.18.4 is affected.
+perl5.16.3 is affected.
+perl5.14.4 is affected.
