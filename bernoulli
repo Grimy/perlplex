@@ -1,0 +1,6 @@
+seq 9|perl -Mbigrat -ple'@_=map$;=/_/?1/($i=$.):($_-$;)*--$i,_,@_;$_=$;'
+seq 9|perl -Mbigrat -ple'$i=@_=($b=$;=1/$_,map$;=($_-$;)*$i--,@_);$_=$;'
+seq 10|perl -Mbigrat -ple'$i=@_=(_,map$;=/_/?1/@_:($_-$;)*--$i,@_);$_=$;'
+# use bigrat;map{@_=map$;=$i?($_-$;)*$i--:($i=@_,$_),1/$_,@_;print"@_"}1..pop
+# use bigrat;map{$_[$_]=1/$_;($_[$_]-=$_[$_+1])*=$_ while--$_;print$_[1]}1..pop
+# use bigrat;map{(($_[$_]//=1/$_/$_)-=$_[$_+1]//0)*=$_--while$_;print$_[1]}1..pop
